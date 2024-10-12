@@ -220,7 +220,7 @@ app.add_middleware(
 
 makeup_app = MakeupApplication()
 
-@app.get("/video_feed")
+@app.get("/")
 async def video_feed():
     return StreamingResponse(makeup_app.generate_video(), media_type="multipart/x-mixed-replace; boundary=frame")
 
