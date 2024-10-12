@@ -1,0 +1,8 @@
+opencv-python
+mediapipe
+itertools
+numpy
+scipy
+fastapi
+uvicorn
+threading
