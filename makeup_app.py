@@ -5,6 +5,8 @@ import numpy as np
 from scipy.interpolate import splev, splprep
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 import uvicorn
 from threading import Thread
 
@@ -170,57 +172,142 @@ class MakeupApplication:
 
         return frame
 
-    def start_video(self):
-        cap = cv2.VideoCapture(0)
-        while cap.isOpened():
-            success, frame = cap.read()
-            if not success:
-                print("Ignoring empty camera frame.")
-                continue
+    # def start_video(self):
+    #     cap = cv2.VideoCapture(0)
+    #     while cap.isOpened():
+    #         success, frame = cap.read()
+    #         if not success:
+    #             print("Ignoring empty camera frame.")
+    #             continue
 
-            frame = self.process_frame(frame)
+    #         frame = self.process_frame(frame)
 
-            cv2.imshow('Makeup Application', frame)
-            if cv2.waitKey(5) & 0xFF == 27:
-                break
+    #         cv2.imshow('Makeup Application', frame)
+    #         if cv2.waitKey(5) & 0xFF == 27:
+    #             break
 
-        cap.release()
-        cv2.destroyAllWindows()
+    #     cap.release()
+    #     cv2.destroyAllWindows()
     
-    def generate_video(self):
-        cap = cv2.VideoCapture(0)
-        while cap.isOpened():
-            success, frame = cap.read()
-            if not success:
-                break
-            frame = self.process_frame(frame)
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        cap.release()
+    # def generate_video(self):
+    #     cap = cv2.VideoCapture(0)
+    #     while cap.isOpened():
+    #         success, frame = cap.read()
+    #         if not success:
+    #             break
+    #         frame = self.process_frame(frame)
+    #         ret, buffer = cv2.imencode('.jpg', frame)
+    #         frame = buffer.tobytes()
+    #         yield (b'--frame\r\n'
+    #                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    #     cap.release()
 
 # FastAPI setup
 app = FastAPI()
 makeup_app = MakeupApplication()
 
+
+
 @app.get("/")
-async def main():
+async def get():
     html_content = """
     <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Makeup Application</title>
     </head>
     <body>
         <h1>Real-time Makeup Application</h1>
-        <img id="video-stream" src="/video_feed" alt="Video Stream" width="640" height="480"/>
+        <video id="video" width="640" height="480" autoplay style="display:none;"></video>
+        <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+        <img id="processedVideo" width="640" height="480" />
+        <script>
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const processedVideo = document.getElementById('processedVideo');
+            const context = canvas.getContext('2d');
+
+            // Get the appropriate WebSocket URL
+            const ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            const ws = new WebSocket(ws_scheme + '://' + window.location.host + '/ws');
+
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = function() {
+                console.log("WebSocket connection established");
+            };
+
+            ws.onmessage = function(event) {
+                const arrayBuffer = event.data;
+                const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                processedVideo.src = url;
+            };
+
+            ws.onerror = function(error) {
+                console.error("WebSocket error: ", error);
+            };
+
+            ws.onclose = function(event) {
+                console.log("WebSocket connection closed: ", event);
+            };
+
+            // Access the user's webcam
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function(stream) {
+                    video.srcObject = stream;
+                    video.play();
+
+                    video.onloadedmetadata = function() {
+                        // Start sending frames when video is ready
+                        sendFrame();
+                    };
+
+                    function sendFrame() {
+                        if (ws.readyState !== WebSocket.OPEN) {
+                            return;
+                        }
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        canvas.toBlob(function(blob) {
+                            if (blob) {
+                                ws.send(blob);
+                            }
+                        }, 'image/jpeg', 0.8);
+                        requestAnimationFrame(sendFrame);
+                    }
+
+                })
+                .catch(function(err) {
+                    console.error("Error accessing the camera: " + err);
+                });
+        </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            # Convert bytes data to numpy array
+            np_arr = np.frombuffer(data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            # Process frame
+            processed_frame = makeup_app.process_frame(frame)
+            # Encode frame back to bytes
+            ret, buffer = cv2.imencode('.jpg', processed_frame)
+            await websocket.send_bytes(buffer.tobytes())
+    except WebSocketDisconnect:
+        print("Client disconnected")
+    except Exception as e:
+        print("Error:", e)
+        await websocket.close()
+
+
 
 @app.get("/video_feed")
 async def video_feed():
@@ -228,6 +315,7 @@ async def video_feed():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("makeup_app:app", host="0.0.0.0", port=8000)
+    # uvicorn.run(app, host="0.0.0.0", port=8000)
     # makeup_app = MakeupApplication()
     # makeup_app.start_video()
