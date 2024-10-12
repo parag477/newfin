@@ -1,6 +1,6 @@
-opencv-python
+fastapi
+uvicorn
+opencv-python-headless
 mediapipe
 numpy
 scipy
-fastapi
-uvicorn
