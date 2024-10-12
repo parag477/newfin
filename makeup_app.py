@@ -204,6 +204,24 @@ class MakeupApplication:
 app = FastAPI()
 makeup_app = MakeupApplication()
 
+@app.get("/")
+async def main():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Makeup Application</title>
+    </head>
+    <body>
+        <h1>Real-time Makeup Application</h1>
+        <img id="video-stream" src="/video_feed" alt="Video Stream" width="640" height="480"/>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
 @app.get("/video_feed")
 async def video_feed():
     return StreamingResponse(makeup_app.generate_video(), media_type="multipart/x-mixed-replace; boundary=frame")
