@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 from scipy.interpolate import splev, splprep
 from fastapi import FastAPI, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 import uvicorn
 from threading import Thread
 
