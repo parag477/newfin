@@ -201,6 +201,25 @@ class MakeupApplication:
     #         yield (b'--frame\r\n'
     #                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
     #     cap.release()
+    def generate_video(self):
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Use CAP_DSHOW for better compatibility on Windows
+
+        # Ensure the camera is successfully opened
+        if not cap.isOpened():
+            raise RuntimeError("Error: Could not open video stream.")
+
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
+            frame = self.process_frame(frame)
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+        cap.release()
 
 # FastAPI setup
 app = FastAPI()
@@ -225,61 +244,36 @@ async def get():
             const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
             const processedVideo = document.getElementById('processedVideo');
-            const context = canvas.getContext('2d');
-
-            // Get the appropriate WebSocket URL
-            const ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
-            const ws = new WebSocket(ws_scheme + '://' + window.location.host + '/ws');
-
-            ws.binaryType = 'arraybuffer';
-
-            ws.onopen = function() {
-                console.log("WebSocket connection established");
-            };
-
-            ws.onmessage = function(event) {
-                const arrayBuffer = event.data;
-                const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                processedVideo.src = url;
-            };
-
-            ws.onerror = function(error) {
-                console.error("WebSocket error: ", error);
-            };
-
-            ws.onclose = function(event) {
-                console.log("WebSocket connection closed: ", event);
-            };
+            context = canvas.getContext('2d');
 
             // Access the user's webcam
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(function(stream) {
-                    video.srcObject = stream;
-                    video.play();
+            navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+                video.srcObject = stream;
+                video.play();
+                processVideo();
+            }).catch(err => {
+                console.error('Error accessing the camera: ', err);
+            });
 
-                    video.onloadedmetadata = function() {
-                        // Start sending frames when video is ready
-                        sendFrame();
-                    };
+            // Process the video frames and send them to the backend for makeup application
+            async function processVideo() {
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const frameData = canvas.toDataURL('image/jpeg');
 
-                    function sendFrame() {
-                        if (ws.readyState !== WebSocket.OPEN) {
-                            return;
-                        }
-                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                        canvas.toBlob(function(blob) {
-                            if (blob) {
-                                ws.send(blob);
-                            }
-                        }, 'image/jpeg', 0.8);
-                        requestAnimationFrame(sendFrame);
-                    }
-
-                })
-                .catch(function(err) {
-                    console.error("Error accessing the camera: " + err);
+                // Send the frame to the backend and get the processed frame
+                const response = await fetch('/video_feed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: frameData })
                 });
+
+                const resultBlob = await response.blob();
+                const resultURL = URL.createObjectURL(resultBlob);
+                processedVideo.src = resultURL;
+
+                // Continue processing the next frame
+                requestAnimationFrame(processVideo);
+            }
         </script>
     </body>
     </html>
