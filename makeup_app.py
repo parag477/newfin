@@ -3,7 +3,10 @@ import mediapipe as mp
 import itertools
 import numpy as np
 from scipy.interpolate import splev, splprep
-from fastapi import FastAPI, BackgroundTasks
+# from fastapi import FastAPI, BackgroundTasks
+# from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import uvicorn
 from threading import Thread
@@ -202,12 +205,43 @@ class MakeupApplication:
 
 # FastAPI setup
 app = FastAPI()
+origins = [
+    "http://localhost",
+    "http://localhost:8000",  # Adjust to your frontend URL
+    "http://newfin.onrender.com",  # Adjust for your deployed frontend
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 makeup_app = MakeupApplication()
 
 @app.get("/video_feed")
 async def video_feed():
     return StreamingResponse(makeup_app.generate_video(), media_type="multipart/x-mixed-replace; boundary=frame")
 
+# WebSocket support
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        cap = cv2.VideoCapture(0)
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                await websocket.send_text("Failed to capture video.")
+                break
+            frame = makeup_app.process_frame(frame)
+            _, buffer = cv2.imencode('.jpg', frame)
+            await websocket.send_bytes(buffer.tobytes())
+    except WebSocketDisconnect:
+        print("Client disconnected.")
+    finally:
+        cap.release()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
