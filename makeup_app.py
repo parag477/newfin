@@ -244,36 +244,34 @@ async def get():
             const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
             const processedVideo = document.getElementById('processedVideo');
-            context = canvas.getContext('2d');
-
-            // Access the user's webcam
-            navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-                video.srcObject = stream;
-                video.play();
-                processVideo();
-            }).catch(err => {
-                console.error('Error accessing the camera: ', err);
-            });
-
-            // Process the video frames and send them to the backend for makeup application
-            async function processVideo() {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const frameData = canvas.toDataURL('image/jpeg');
-
-                // Send the frame to the backend and get the processed frame
-                const response = await fetch('/video_feed', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: frameData })
+            const context = canvas.getContext('2d');
+            
+            // Function to request the video stream from the server
+            async function fetchProcessedVideo() {
+                const response = await fetch('/video_feed');
+                const reader = response.body.getReader();
+                let stream = new ReadableStream({
+                    start(controller) {
+                        function push() {
+                            reader.read().then(({ done, value }) => {
+                                if (done) {
+                                    controller.close();
+                                    return;
+                                }
+                                const blob = new Blob([value], { type: 'image/jpeg' });
+                                const url = URL.createObjectURL(blob);
+                                processedVideo.src = url;
+                                push();
+                            });
+                        }
+                        push();
+                    }
                 });
-
-                const resultBlob = await response.blob();
-                const resultURL = URL.createObjectURL(resultBlob);
-                processedVideo.src = resultURL;
-
-                // Continue processing the next frame
-                requestAnimationFrame(processVideo);
+                return new Response(stream);
             }
+
+            // Start fetching the processed video
+            fetchProcessedVideo();
         </script>
     </body>
     </html>
@@ -281,25 +279,25 @@ async def get():
     return HTMLResponse(content=html_content)
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            # Convert bytes data to numpy array
-            np_arr = np.frombuffer(data, np.uint8)
-            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            # Process frame
-            processed_frame = makeup_app.process_frame(frame)
-            # Encode frame back to bytes
-            ret, buffer = cv2.imencode('.jpg', processed_frame)
-            await websocket.send_bytes(buffer.tobytes())
-    except WebSocketDisconnect:
-        print("Client disconnected")
-    except Exception as e:
-        print("Error:", e)
-        await websocket.close()
+# @app.websocket("/ws")
+# async def websocket_endpoint(websocket: WebSocket):
+#     await websocket.accept()
+#     try:
+#         while True:
+#             data = await websocket.receive_bytes()
+#             # Convert bytes data to numpy array
+#             np_arr = np.frombuffer(data, np.uint8)
+#             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+#             # Process frame
+#             processed_frame = makeup_app.process_frame(frame)
+#             # Encode frame back to bytes
+#             ret, buffer = cv2.imencode('.jpg', processed_frame)
+#             await websocket.send_bytes(buffer.tobytes())
+#     except WebSocketDisconnect:
+#         print("Client disconnected")
+#     except Exception as e:
+#         print("Error:", e)
+#         await websocket.close()
 
 
 
