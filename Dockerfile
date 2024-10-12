@@ -1,15 +1,10 @@
 # Use an official Python runtime as a parent image
-FROM python:3.10-slim
-
-# Install system dependencies (for opencv-python and other packages)
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0
+FROM python:3.9-slim
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
+# Copy the current directory contents into the container
 COPY . /app
 
 # Install any needed packages specified in requirements.txt
@@ -19,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 8000
 
 # Define environment variable
-ENV PORT 8000
+ENV PYTHONUNBUFFERED=1
 
-# Run the FastAPI app with uvicorn
+# Run the FastAPI server
 CMD ["uvicorn", "makeup_app:app", "--host", "0.0.0.0", "--port", "8000"]
